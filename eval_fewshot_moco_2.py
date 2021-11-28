@@ -8,7 +8,11 @@ import sys
 
 import torch
 import torch.backends.cudnn as cudnn
+import numpy as np
 from torch.utils.data import DataLoader
+
+from torchvision import transforms
+from PIL import Image
 
 from models import model_dict, model_pool
 from models.util import create_model
@@ -28,7 +32,7 @@ def parse_option():
     parser = argparse.ArgumentParser('argument for training')
 
     # load pretrained model
-    parser.add_argument('--model', type=str, default='resnet12', choices=model_pool)
+    parser.add_argument('--model', type=str, default='resnet12_moco', choices=model_pool)
     parser.add_argument('--model_path', type=str, default=None, help='absolute path to .pth model')
 
     # dataset
@@ -89,6 +93,32 @@ def main():
 
     if opt.dataset == 'miniImageNet':
         train_trans, test_trans = transforms_options[opt.transform]
+        crop = 0.2
+        image_size = 84
+        mean = [120.39586422 / 255.0, 115.59361427 / 255.0, 104.54012653 / 255.0]
+        std = [70.68188272 / 255.0, 68.27635443 / 255.0, 72.54505529 / 255.0]
+        crop_padding = 32
+        normalize = transforms.Normalize(mean=mean, std=std)
+        train_trans = transforms.Compose([
+            lambda x: Image.fromarray(x),
+            transforms.RandomResizedCrop(image_size, scale=(crop, 1.)),
+            transforms.RandomGrayscale(p=0.2),
+            transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
+            transforms.RandomHorizontalFlip(),
+            lambda x: np.asarray(x),
+            transforms.ToTensor(),
+            normalize,
+        ])
+        
+        test_trans = transforms.Compose([
+            lambda x: Image.fromarray(x),
+            transforms.Resize(image_size + crop_padding),
+            transforms.CenterCrop(image_size),
+            lambda x: np.asarray(x),
+            transforms.ToTensor(),
+            normalize,
+        ])
+        
         meta_testloader = DataLoader(MetaImageNet(args=opt, partition='test',
                                                   train_transform=train_trans,
                                                   test_transform=test_trans,
@@ -151,7 +181,10 @@ def main():
 
     # load model
     model = create_model(opt.model, n_cls, opt.dataset)
-    ckpt = torch.load(opt.model_path)
+    if torch.cuda.is_available():
+        ckpt = torch.load(opt.model_path)
+    else:
+        ckpt = torch.load(opt.model_path,map_location=torch.device('cpu'))
     model.load_state_dict(ckpt['model'])
 
     print("Number of model params = ",count_parameters(model))

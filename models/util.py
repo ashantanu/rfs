@@ -9,6 +9,8 @@ def create_model(name, n_cls, dataset='miniImageNet'):
     if dataset == 'miniImageNet' or dataset == 'tieredImageNet':
         if name.endswith('v2') or name.endswith('v3'):
             model = model_dict[name](num_classes=n_cls)
+        elif 'moco' in name:
+            model = model_dict[name]()#model_dict[name](low_dim=n_cls)
         elif name.startswith('resnet50'):
             print('use imagenet-style resnet50')
             model = model_dict[name](num_classes=n_cls)

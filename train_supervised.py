@@ -124,6 +124,9 @@ def parse_option():
 
     return opt
 
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
 
 def main():
 
@@ -208,6 +211,7 @@ def main():
 
     # model
     model = create_model(opt.model, n_cls, opt.dataset)
+    print("Number of model params = ",count_parameters(model))
 
     # optimizer
     if opt.adam:

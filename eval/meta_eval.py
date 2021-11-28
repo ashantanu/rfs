@@ -29,7 +29,6 @@ def normalize(x):
     out = x.div(norm)
     return out
 
-
 def meta_test(net, testloader, use_logit=True, is_norm=True, classifier='LR', opt=None):
     net = net.eval()
     acc = []
@@ -37,6 +36,7 @@ def meta_test(net, testloader, use_logit=True, is_norm=True, classifier='LR', op
     with torch.no_grad():
         for idx, data in tqdm(enumerate(testloader)):
             support_xs, support_ys, query_xs, query_ys = data
+            # print(support_xs.shape, support_ys.shape, query_xs.shape, query_ys.shape)
             support_xs = support_xs.cuda()
             query_xs = query_xs.cuda()
             batch_size, _, channel, height, width = support_xs.size()
@@ -44,6 +44,7 @@ def meta_test(net, testloader, use_logit=True, is_norm=True, classifier='LR', op
             query_xs = query_xs.view(-1, channel, height, width)
 
             if use_logit:
+                # print(len(net(support_xs)),len(net(support_xs)[0]))
                 support_features = net(support_xs).view(support_xs.size(0), -1)
                 query_features = net(query_xs).view(query_xs.size(0), -1)
             else:
@@ -92,6 +93,73 @@ def meta_test(net, testloader, use_logit=True, is_norm=True, classifier='LR', op
 
     return mean_confidence_interval(acc)
 
+
+def meta_test_moco(net, testloader, use_logit=True, is_norm=True, classifier='LR', opt=None):
+    net = net.eval()
+    acc = []
+
+    with torch.no_grad():
+        for idx, data in tqdm(enumerate(testloader)):
+            support_xs, support_ys, query_xs, query_ys = data
+            support_xs = support_xs.cuda()
+            query_xs = query_xs.cuda()
+            batch_size, _, channel, height, width = support_xs.size()
+            support_xs = support_xs.view(-1, channel, height, width)
+            query_xs = query_xs.view(-1, channel, height, width)
+
+            if use_logit:
+                support_features = net(support_xs)
+                # print(support_xs.shape,support_features.shape)
+                support_features = support_features.view(support_xs.size(0), -1)
+                query_features = net(query_xs).view(query_xs.size(0), -1)
+            else:
+                feat_support = net(support_xs, layer = 6)
+                # print(support_xs.shape,feat_support.shape)
+                # support_features = feat_support[-1].view(support_xs.size(0), -1)
+                support_features = feat_support.view(support_xs.size(0), -1)
+                feat_query = net(query_xs, layer = 6)
+                # query_features = feat_query[-1].view(query_xs.size(0), -1)
+                query_features = feat_query.view(query_xs.size(0), -1)
+
+            if is_norm:
+                support_features = normalize(support_features)
+                query_features = normalize(query_features)
+
+            support_features = support_features.detach().cpu().numpy()
+            query_features = query_features.detach().cpu().numpy()
+
+            support_ys = support_ys.view(-1).numpy()
+            query_ys = query_ys.view(-1).numpy()
+
+            #  clf = SVC(gamma='auto', C=0.1)
+            if classifier == 'LR':
+                clf = LogisticRegression(penalty='l2',
+                                         random_state=0,
+                                         C=1.0,
+                                         solver='lbfgs',
+                                         max_iter=1000,
+                                         multi_class='multinomial')
+                clf.fit(support_features, support_ys)
+                query_ys_pred = clf.predict(query_features)
+            elif classifier == 'SVM':
+                clf = make_pipeline(StandardScaler(), SVC(gamma='auto',
+                                                          C=1,
+                                                          kernel='linear',
+                                                          decision_function_shape='ovr'))
+                clf.fit(support_features, support_ys)
+                query_ys_pred = clf.predict(query_features)
+            elif classifier == 'NN':
+                query_ys_pred = NN(support_features, support_ys, query_features)
+            elif classifier == 'Cosine':
+                query_ys_pred = Cosine(support_features, support_ys, query_features)
+            elif classifier == 'Proto':
+                query_ys_pred = Proto(support_features, support_ys, query_features, opt)
+            else:
+                raise NotImplementedError('classifier not supported: {}'.format(classifier))
+
+            acc.append(metrics.accuracy_score(query_ys, query_ys_pred))
+
+    return mean_confidence_interval(acc)
 
 def Proto(support, support_ys, query, opt):
     """Protonet classifier"""
